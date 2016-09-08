@@ -53,28 +53,11 @@ INT_PTR CALLBACK UsageDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 }
 
 void ShowUsageDialog(HINSTANCE hInstance) {
-	MSG msg;
-	BOOL ret;
-	HWND hDialog;
-
 	// init visual styles
 	InitCommonControls();
 
 	// show dialog
 	DialogBoxW(hInstance, MAKEINTRESOURCE(SHELLEVATEABOUT), 0, UsageDialogProc);
-
-	return;
-
-	std::wostringstream usage;
-
-	usage << "shellevate" << std::endl << std::endl;
-	usage << "Usage: shellevate [/shell] [/elevate] [/asinvoker] [/netonly] <program> <arguments>" << std::endl << std::endl;
-	usage << "/shell        Uses ShellExecute to run <program> after switching user contexts" << std::endl;
-	usage << "/elevate      Force UAC elevation of <program> after switching user contexts" << std::endl;
-	usage << "/asinvoker    Force <program> to run without UAC elevation after switching user contexts" << std::endl;
-	usage << "/netonly      Use specified credentials for remote access only" << std::endl;
-
-	MessageBoxW(NULL, usage.str().c_str(), L"shellevate Usage", 0);
 }
 
 struct ShellExecFlags {
@@ -418,8 +401,8 @@ void DoShellExecute(ShellExecFlags &flags) {
 	}
 
 	// shell execute
-	int rc = (int)ShellExecuteW(NULL, flags.operation.c_str(), lpFile, lpParameters, NULL, SW_SHOWNORMAL);
-	if (rc <= 32 && GetLastError() != ERROR_CANCELLED) {
+	HINSTANCE rc = ShellExecuteW(NULL, flags.operation.c_str(), lpFile, lpParameters, NULL, SW_SHOWNORMAL);
+	if (rc <= (HINSTANCE)32 && GetLastError() != ERROR_CANCELLED) {
 		ShowErrorDialogFromLastError();
 	}
 }

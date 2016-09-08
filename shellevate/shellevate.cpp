@@ -261,14 +261,19 @@ public:
 	LPCWSTR password() { return this->_password.empty() ? NULL : this->_password.c_str(); }
 };
 
-bool GetCredentials(AuthCredentials &creds) {
+bool GetCredentials(AuthCredentials &creds, std::wstring &program) {
 	CREDUI_INFO info;
 	AuthenticationBuffer authBuffer;
+	std::wostringstream messageBuilder;
+
+	// build message with given program name
+	messageBuilder << "enter credentials to use for " << program;
+	std::wstring message(messageBuilder.str());
 
 	info.cbSize = sizeof(CREDUI_INFO);
 	info.hwndParent = NULL;
-	info.pszMessageText = L"Message";
-	info.pszCaptionText = L"Caption";
+	info.pszMessageText = message.c_str();
+	info.pszCaptionText = L"shellevate";
 	info.hbmBanner = NULL;
 
 	// show prompt for credentials
@@ -363,7 +368,7 @@ void DoRunAs(CommandLineFlags &flags) {
 	}
 
 	// get credentials or bail
-	if (!GetCredentials(credentials)) return;
+	if (!GetCredentials(credentials, flags.program)) return;
 
 	// start process
 	auto ret = CreateProcessWithLogonW(credentials.username(), credentials.domain(), credentials.password(), dwLogonFlags, NULL, lpCommandLine, 0, NULL, NULL, &startupInfo, &processInformation);

@@ -260,20 +260,50 @@ public:
 
 struct AuthCredentials {
 private:
-	std::wstring _domain;
-	std::wstring _username;
-	std::wstring _password;
+	std::vector<wchar_t> _domain;
+	std::vector<wchar_t> _username;
+	std::vector<wchar_t> _password;
+
+	void clear() {
+		// zero buffers securely if they are not empty
+		if (!_domain.empty())
+			SecureZeroMemory(_domain.data(), _domain.size());
+		if (!_username.empty())
+			SecureZeroMemory(_username.data(), _username.size());
+		if (!_password.empty())
+			SecureZeroMemory(_password.data(), _password.size());
+	}
 
 public:
 	AuthCredentials() : _domain(), _username(), _password() {}
+	~AuthCredentials() {
+		clear();
+	}
 
-	void set_domain(LPCWSTR value) { this->_domain.assign(value); }
-	void set_username(LPCWSTR value) { this->_username.assign(value); }
-	void set_password(LPCWSTR value) { this->_password.assign(value); }
+	void alloc(std::size_t domain_size, std::size_t username_size, std::size_t password_size) {
+		clear();
 
-	LPCWSTR domain() { return this->_domain.empty() ? NULL : this->_domain.c_str(); }
-	LPCWSTR username() { return this->_username.empty() ? NULL : this->_username.c_str(); }
-	LPCWSTR password() { return this->_password.empty() ? NULL : this->_password.c_str(); }
+		_domain.assign(domain_size, 0);
+		_username.assign(username_size, 0);
+		_password.assign(password_size, 0);
+	}
+
+	void check_for_domain_in_username() {
+		// do nothing if we already have a domain value or don't have a username value
+		if (!_domain.empty() || _username.empty()) return;
+
+		// find a backslash in the username
+		auto backslash = std::find(_username.begin(), _username.end(), L'\\');
+		if (backslash != std::end(_username)) {
+			_domain.assign(_username.begin(), ++backslash);
+			_domain.back() = 0;
+			_username.erase(_username.begin(), backslash);
+		}
+	}
+
+	LPWSTR domain() { return this->_domain.empty() ? NULL : this->_domain.data(); }
+	LPWSTR username() { return this->_username.empty() ? NULL : this->_username.data(); }
+	LPWSTR password() { return this->_password.empty() ? NULL : this->_password.data(); }
 };
 
 bool GetCredentials(AuthCredentials &creds, std::wstring &program, DWORD lastError) {
@@ -303,15 +333,24 @@ bool GetCredentials(AuthCredentials &creds, std::wstring &program, DWORD lastErr
 		return false;
 	}
 
-	WCHAR szUserName[256];
-	DWORD cchMaxUserName = ARRAYSIZE(szUserName);
-	WCHAR szDomainName[256];
-	DWORD cchMaxDomainname = ARRAYSIZE(szDomainName);
-	WCHAR szPassword[512];
-	DWORD cchMaxPassword = ARRAYSIZE(szPassword);
+	DWORD cchMaxUserName = 0;
+	DWORD cchMaxDomainName = 0;
+	DWORD cchMaxPassword = 0;
+
+	// call unpack function with null buffers to determine required buffer sizes
+	ret = CredUnPackAuthenticationBufferW(0, *authBuffer.buf(), *authBuffer.size(), NULL, &cchMaxUserName, NULL, &cchMaxDomainName, NULL, &cchMaxPassword);
+
+	// show error dialog on failure other than insufficient buffer
+	if (ret == TRUE || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+		ShowErrorDialogFromLastError();
+		return false;
+	}
+
+	// allocate the required buffer sizes
+	creds.alloc(cchMaxDomainName, cchMaxUserName, cchMaxPassword);
 
 	// unpack credential buffer
-	ret = CredUnPackAuthenticationBufferW(0, *authBuffer.buf(), *authBuffer.size(), szUserName, &cchMaxUserName, szDomainName, &cchMaxDomainname, szPassword, &cchMaxPassword);
+	ret = CredUnPackAuthenticationBufferW(0, *authBuffer.buf(), *authBuffer.size(), creds.username(), &cchMaxUserName, creds.domain(), &cchMaxDomainName, creds.password(), &cchMaxPassword);
 
 	// show error dialog on failure
 	if (ret == FALSE) {
@@ -319,10 +358,7 @@ bool GetCredentials(AuthCredentials &creds, std::wstring &program, DWORD lastErr
 		return false;
 	}
 
-	// assign values to given credentials object
-	creds.set_domain(szDomainName);
-	creds.set_username(szUserName);
-	creds.set_password(szPassword);
+	creds.check_for_domain_in_username();
 
 	return true;
 }

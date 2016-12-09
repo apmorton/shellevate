@@ -3,6 +3,21 @@
 
 HINSTANCE g_hInst = NULL;
 
+const std::vector<DWORD> knownLogonErrorCodes({
+	ERROR_LOGON_FAILURE,
+	ERROR_ACCESS_DENIED,
+	ERROR_INVALID_PASSWORD,
+	ERROR_PASSWORD_EXPIRED,
+	ERROR_PASSWORD_MUST_CHANGE,
+	ERROR_DS_CANT_ON_RDN,
+	ERROR_ACCOUNT_DISABLED,
+	ERROR_ACCOUNT_RESTRICTION,
+	ERROR_ACCOUNT_LOCKED_OUT,
+	ERROR_ACCOUNT_EXPIRED,
+	ERROR_LOGON_TYPE_NOT_GRANTED,
+	NERR_PasswordExpired,
+});
+
 void ShowErrorDialogFromLastError() {
 	LPTSTR errorText = NULL;
 
@@ -261,7 +276,7 @@ public:
 	LPCWSTR password() { return this->_password.empty() ? NULL : this->_password.c_str(); }
 };
 
-bool GetCredentials(AuthCredentials &creds, std::wstring &program) {
+bool GetCredentials(AuthCredentials &creds, std::wstring &program, DWORD lastError) {
 	CREDUI_INFO info;
 	AuthenticationBuffer authBuffer;
 	std::wostringstream messageBuilder;
@@ -277,7 +292,7 @@ bool GetCredentials(AuthCredentials &creds, std::wstring &program) {
 	info.hbmBanner = NULL;
 
 	// show prompt for credentials
-	auto ret = CredUIPromptForWindowsCredentialsW(&info, 0, authBuffer.package(), NULL, 0, authBuffer.buf(), authBuffer.size(), NULL, 0);
+	auto ret = CredUIPromptForWindowsCredentialsW(&info, lastError, authBuffer.package(), NULL, 0, authBuffer.buf(), authBuffer.size(), NULL, 0);
 
 	// bail silently on cancel
 	if (ret == ERROR_CANCELLED) return false;
@@ -367,16 +382,30 @@ void DoRunAs(CommandLineFlags &flags) {
 		lpCommandLine = &childArguments[0];
 	}
 
-	// get credentials or bail
-	if (!GetCredentials(credentials, flags.program)) return;
+	DWORD lastError = ERROR_SUCCESS;
 
-	// start process
-	auto ret = CreateProcessWithLogonW(credentials.username(), credentials.domain(), credentials.password(), dwLogonFlags, NULL, lpCommandLine, 0, NULL, NULL, &startupInfo, &processInformation);
+	// try to get credentials and launch application until someone breaks the loop
+	while (true) {
+		// get credentials or bail if user pressed cancel
+		if (!GetCredentials(credentials, flags.program, lastError)) break;
 
-	// show dialog on error
-	if (ret == FALSE) {
-		ShowErrorDialogFromLastError();
-		return;
+		// start process
+		auto ret = CreateProcessWithLogonW(credentials.username(), credentials.domain(), credentials.password(), dwLogonFlags, NULL, lpCommandLine, 0, NULL, NULL, &startupInfo, &processInformation);
+
+		// break the loop if it launched successfully
+		if (ret == TRUE) break;
+
+		// store the current error
+		lastError = GetLastError();
+
+		// if the error code is a known logon error, try again
+		if (std::find(knownLogonErrorCodes.begin(), knownLogonErrorCodes.end(), lastError) != knownLogonErrorCodes.end()) continue;
+
+		// show dialog if the error can't be mapped to any known login errors
+		if (ret == FALSE) {
+			ShowErrorDialogFromLastError();
+			break;
+		}
 	}
 }
 
